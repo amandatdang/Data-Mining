@@ -1,0 +1,629 @@
+---
+title: "Project 2 Code"
+author: "Nidhi, Amanda, Adam"
+date: "10/28/2022"
+output: html_document
+---
+
+## Problem Description
+After Steve Rogers replaced the Infinity Stones, Stark Enterprises has branched into the financial industry. Perhaps Steve Rogers changed something when he traveled back in time. Since Mr. Stark is on a different timeline, they are short of analytical power. They would like to build a model and predict which customers are likely to have high-risk.
+
+## Objective
+In this case, we will need to select the appropriate variables to train at least 2 different models to predict the target variable. With the best model, we will predict the risk level of the new customers given.
+
+## Describing the Data
+In each of our models, we used a different set of what we believed were key variables. These variables described the customers' wealth, background, and application. 
+
+## Load Libraries
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(forecast)
+library(caret)
+library(car)
+library(ROSE)
+library(ggplot2)
+```
+
+## Model 1: Load Data
+```{r}
+Ndf <- read.csv("credit_fa2022_5.csv")
+Ndf <- Ndf [ , -c(1)]
+Ndf1 <- Ndf[ , c(2:11, 14:16, 42:61)]
+Ndf1_clean <- drop_na(Ndf1)
+
+head(Ndf1_clean)
+str(Ndf1_clean)
+```
+After reading in the data, I deleted the first column, X, which simply noted which record of the entire data set this sample record was picked from. For our first model, I decided to look at the following independent variables to predict the outcome of "Target": Whether the individual had payment difficulties and is at high risk. 
+
+Independent Variables: Contract Type, Gender, Owns Car, Owns Realty, Number of Children, Income, Credit Amount of Loan, Loan Annuity, Education, Family Status, Housing Situation, and whether they provided all their documents. I chose these variables since they seemed to represent the client's wealth and whether or not they provided all of their documentation, which seems like strong predictors of whether they are high risk or not. 
+
+Since this is a kNN model which can not handle missing data, I dropped all records with N/A values from the data set. 
+
+## Model 1: Factorizing Data
+```{r}
+Ndf1_clean$TARGET <- factor(Ndf1_clean$TARGET, 
+                              levels = c("0", "1"),
+                              labels = c("No", "Yes"))
+Ndf1_clean[, c(2:5, 11:33)] <- lapply(Ndf1_clean[, c(2:5, 11:33)], as.factor)
+str(Ndf1_clean)
+```
+I factorized the outcome variable and all the categorical variables in the data set so the kNN runs smoothly. 
+
+## Model 1: Training-Validation Set
+```{r}
+set.seed(666)
+
+Ntrain_index <- sample(1:nrow(Ndf1_clean), 0.7 * nrow(Ndf1_clean))
+Nvalid_index <- setdiff(1:nrow(Ndf1_clean), Ntrain_index)
+
+Ntrain <- Ndf1_clean[Ntrain_index, ]
+Nvalid <- Ndf1_clean[Nvalid_index, ]
+
+nrow(Ntrain)
+nrow(Nvalid)
+```
+
+## Model 1: Normalize Training and Validation Set
+```{r}
+Ntrain_norm <- Ntrain
+Nvalid_norm <- Nvalid
+
+Nnorm_values <- preProcess(Ntrain[, -c(1:5, 11:33)],
+                          method = c("center",
+                                     "scale"))
+Ntrain_norm[, -c(1:5, 11:33)] <- predict(Nnorm_values,
+                               Ntrain[, -c(1:5, 11:33)])
+
+Nvalid_norm[, -c(1:5, 11:33)] <- predict(Nnorm_values,
+                                Nvalid[, -c(1:5, 11:33)])
+head(Nvalid_norm)
+```
+
+I normalized the training and validation set separately since the model only is built off of the training set. In our scenario, the validation set is almost treated like "new data" so it shouldn't be normalized with the training set. 
+
+## Model 1: Load in New Customers and Normalize
+```{r}
+Nnew_cust <- read.csv("credit_test_fa2022_5.csv")
+Nnew_cust<- Nnew_cust [ , -c(1)]
+Nnew_cust1 <- Nnew_cust[ , c(2:10, 13:15, 41:60)]
+Nnew_cust1 <- drop_na(Nnew_cust1)
+
+Nnew_cust1[, c(1:4, 10:32)] <- lapply(Nnew_cust1[, c(1:4, 10:32)], as.factor)
+
+str(Nnew_cust1)
+
+Nnorm_values1 <- preProcess(Nnew_cust1[, -c(1:4, 10:32)],
+                          method = c("center",
+                                     "scale"))
+Nnew_cust_norm <- Nnew_cust1
+Nnew_cust_norm[, -c(1:4, 10:32)] <- predict(Nnorm_values,
+                               Nnew_cust1[, -c(1:4, 10:32)])
+head(Nnew_cust_norm)
+```
+
+## Model 1: KNN Model, k = 3
+Using the same variables, I tested out the kNN model with multiple Ks to find the ideal number of nearest neighbors. 
+
+## K = 3
+## Train Model
+```{r}
+Ntrain_norm <- Ntrain_norm[,-c(22,24)]
+Nknn_model1_k3 <- caret::knn3(TARGET ~ ., 
+                            data = Ntrain_norm, k = 3)
+Nknn_model1_k3
+```
+Document 10 and 12 only have 1 level, which makes it not possible to run the kNN. Therefore, I will remove these variables.
+
+## Predict Training Set
+```{r}
+Nknn_pred_k3_train <- predict(Nknn_model1_k3, 
+                             newdata = Ntrain_norm[, -c(1)], 
+                             type = "class")
+head(Nknn_pred_k3_train)
+```
+
+
+## Evaluate
+```{r}
+confusionMatrix(Nknn_pred_k3_train, as.factor(Ntrain_norm[, 1]), 
+                positive = "Yes")
+```
+The confusion matrix indicates that the model has a strong accuracy score at .8499, which indicates that the model predicted 85% of the records in the training data accurately. However, the model has a low sensitivity score of .40, which indicates that it has a poor recall rate, and is not able to accurately predict a true positive. The specificity score is high at .95, indicating that the model is very good at predicting true negatives. However, since we want to predict the true positives, whether the individuals are high risk or not, this may not be the best model for our business problem. 
+
+## Predict Validation Set
+
+```{r}
+Nknn_pred_k3_valid <- predict(Nknn_model1_k3, 
+                             newdata = Nvalid_norm[, -c(1)], 
+                             type = "class")
+head(Nknn_pred_k3_valid)
+
+confusionMatrix(Nknn_pred_k3_valid, as.factor(Nvalid_norm[, 1]),
+                positive = "Yes")
+```
+As expected, the validation model has lower accuracies, sensitivity, and specificity rates than the training set, since the model is tailored to the training set. The accuracy is still fairly strong at 75%, as is the specificity rate at 89%. However, the sensitivity rate has fallen even lower to .13. This indicates that this kNN model is not strong at predicting true positives for new data, which is the goal of our business problem. 
+
+## Evaluate
+``` {r}
+library(ROSE)
+
+ROSE::roc.curve(Nvalid_norm$TARGET, 
+                Nknn_pred_k3_valid)
+```
+When analyzing the ROC curve, the curve almost matches the straight line, indicating  that most of the correct positive guesses may be due to random chance rather than the predicting power of the model. The AUC is .518, which is pretty low. Let's see if a different k number will improve our results. 
+
+
+
+## Model 1: kNN Model, k = 5
+# Train Model
+```{r}
+Nknn_model1_k5 <- caret::knn3(TARGET ~ ., 
+                            data = Ntrain_norm, k = 5)
+Nknn_model1_k5
+```
+
+## Predict Training Set
+```{r}
+Nknn_pred_k5_train <- predict(Nknn_model1_k5, 
+                             newdata = Ntrain_norm[, -c(1)], 
+                             type = "class")
+head(Nknn_pred_k5_train)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(Nknn_pred_k5_train, as.factor(Ntrain_norm[, 1]), 
+                positive = "Yes")
+```
+The accuracy of the k = 5 kNN model is .82 which is slightly lower than the k = 3. The sensitiviy rate is also much lower, and indicates that the model is not strong at predicting true positives. 
+
+## Model 1: Predict Validation Set
+```{r}
+Nknn_pred_k5_valid <- predict(Nknn_model1_k5, 
+                             newdata = Nvalid_norm[, -c(1)], 
+                             type = "class")
+head(Nknn_pred_k5_valid)
+
+confusionMatrix(Nknn_pred_k5_valid, as.factor(Nvalid_norm[, 1]),
+                positive = "Yes")
+```
+The accuracy of the validation set is lower than all the other variations of this model, but still strong at 77%. The specificity rate is also strong at .93. However, the sensitivity rate is very low at .09614, which indicates that the model is very poor at predicting true positives. This is an issue since we want to accurately predict which clients are high risk. 
+
+## Model 1 : Evaluate
+``` {r}
+library(ROSE)
+
+ROSE::roc.curve(Nvalid_norm$TARGET, 
+                Nknn_pred_k5_valid)
+```
+The AUC is also low at .518. The curve almost matches the diagonal line, indicating that the categorization of true positives may be due to random chance, and not the predicting power of the model. 
+
+One reason that the accuracy may be high but the sensitivity is low could be due to data imbalance. 
+```{r}
+table(Ntrain$TARGET)
+```
+The training set has 16,857 no values, but only 4,122 yes values. Since the model has more NO records to predict trends from, it may be good at predicting these better than the yes. 
+
+Another reason is that the variables in the model may not be strong predictors of whether or not the individual is at high risk. Therefore, it is good to test out other variables. Additionally, since kNN models tend to perform better with fewer variables, we can try limiting the number of predictors we include in the model as well. 
+
+
+## Model 2: Load Data
+```{r}
+df <- read.csv("credit_fa2022_5.csv")
+AD_df <- df [ , -c(1)]
+AD_df2 <- AD_df[ , -c(1, 13, 18, 22:28, 35:40, 42, 63:65)]
+AD_df1 <- AD_df[ , c(2:11, 13:17, 19:20)]
+AD_df1_clean <- drop_na(AD_df1)
+
+head(AD_df)
+str(AD_df2)
+```
+After I loaded the data, I selected the ones I will use to predict the "Target". The variables that I decided to include were Contract Type, Gender, If They Owned A Car, If They Owned Realty, Number of Children, Total Income, Credit Amount, Loan Annuity, Price of Goods, Income Type, Education Type, Family Status, Housing Type, Days Employed, Days Before Registration, and Days Before ID Was Published. I chose these variables since they seemed to represent the client's wealth and their background information, which seemed like strong predictors of whether or not they were high risk.
+
+Any N/A values were then dropped in order to proceed with the kNN model.
+
+## Model 2: Factorizing Data
+```{r}
+AD_df1_clean$TARGET <- factor(AD_df1_clean$TARGET, 
+                              levels = c("0", "1"),
+                              labels = c("No", "Yes"))
+AD_df1_clean$NAME_CONTRACT_TYPE <- as.factor(AD_df1_clean$NAME_CONTRACT_TYPE)
+AD_df1_clean$CODE_GENDER <- as.factor(AD_df1_clean$CODE_GENDER)
+AD_df1_clean$FLAG_OWN_CAR <- as.factor(AD_df1_clean$FLAG_OWN_CAR)
+AD_df1_clean$FLAG_OWN_REALTY <- as.factor(AD_df1_clean$FLAG_OWN_REALTY)
+AD_df1_clean$NAME_INCOME_TYPE <- as.factor(AD_df1_clean$NAME_INCOME_TYPE)
+AD_df1_clean$NAME_EDUCATION_TYPE <- as.factor(AD_df1_clean$NAME_EDUCATION_TYPE)
+AD_df1_clean$NAME_FAMILY_STATUS <- as.factor(AD_df1_clean$NAME_FAMILY_STATUS)
+AD_df1_clean$NAME_HOUSING_TYPE <- as.factor(AD_df1_clean$NAME_HOUSING_TYPE)
+
+str(AD_df1_clean)
+```
+After selecting my variables, I factorized the outcome one and all the categorical ones in the data set.
+
+
+## Model 2: Training-Validation Set
+```{r}
+set.seed(666)
+
+AD_train_index <- sample(1:nrow(AD_df1_clean), 0.7 * nrow(AD_df1_clean))
+AD_valid_index <- setdiff(1:nrow(AD_df1_clean), AD_train_index)
+
+AD_train <- AD_df1_clean[AD_train_index, ]
+AD_valid <- AD_df1_clean[AD_valid_index, ]
+
+nrow(AD_train)
+nrow(AD_valid)
+```
+
+## Model 2: Normalize Training and Validation Set
+```{r}
+AD_train_norm <- AD_train
+AD_valid_norm <- AD_valid
+
+AD_norm_values <- preProcess(AD_train[, c(6:10, 15:17)],
+                          method = c("center",
+                                     "scale"))
+AD_train_norm[, c(6:10, 15:17)] <- predict(AD_norm_values,
+                               AD_train[, c(6:10, 15:17)])
+
+AD_valid_norm[, c(6:10, 15:17)] <- predict(AD_norm_values,
+                                AD_valid[, c(6:10, 15:17)])
+
+head(AD_valid_norm)
+```
+
+## Model 2: Load in New Customers and Normalize
+```{r}
+library(dplyr)
+new_cust <- read.csv("credit_test_fa2022_5.csv")
+AD_new_cust<- new_cust [ , -c(1)]
+AD_new_cust1 <- AD_new_cust[ , c(2:19)]
+
+AD_new_cust1 <- AD_new_cust1 %>% mutate(CODE_GENDER = str_replace(CODE_GENDER, "FALSE", "F"))
+
+AD_new_cust1$NAME_CONTRACT_TYPE <- as.factor(AD_new_cust1$NAME_CONTRACT_TYPE)
+AD_new_cust1$CODE_GENDER <- as.factor(AD_new_cust1$CODE_GENDER)
+AD_new_cust1$FLAG_OWN_CAR <- as.factor(AD_new_cust1$FLAG_OWN_CAR)
+AD_new_cust1$FLAG_OWN_REALTY <- as.factor(AD_new_cust1$FLAG_OWN_REALTY)
+AD_new_cust1$NAME_INCOME_TYPE <- as.factor(AD_new_cust1$NAME_INCOME_TYPE)
+AD_new_cust1$NAME_EDUCATION_TYPE <- as.factor(AD_new_cust1$NAME_EDUCATION_TYPE)
+AD_new_cust1$NAME_FAMILY_STATUS <- as.factor(AD_new_cust1$NAME_FAMILY_STATUS)
+AD_new_cust1$NAME_HOUSING_TYPE <- as.factor(AD_new_cust1$NAME_HOUSING_TYPE)
+
+
+str(AD_new_cust1)
+
+AD_norm_values <- preProcess(AD_new_cust1[, c(6:10, 15:17)],
+                          method = c("center",
+                                     "scale"))
+AD_new_cust_norm <- predict(AD_norm_values, AD_new_cust1)
+AD_new_cust_norm
+```
+
+## Model 2: kNN Model, k = 3
+I tested the kNN model with 3 different k values to find the ideal number of nearest neighbors. 
+## Train Model
+```{r}
+AD_knn_model_k3 <- caret::knn3(TARGET ~ ., 
+                            data = AD_train_norm, k = 3)
+AD_knn_model_k3
+```
+
+## Predict Training Set
+```{r}
+AD_knn_pred_k3_train <- predict(AD_knn_model_k3, 
+                             newdata = AD_train_norm[, -c(1)], 
+                             type = "class")
+head(AD_knn_pred_k3_train)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k3_train, as.factor(AD_train_norm[, 1]),
+                positive = "Yes")
+```
+Looking at the confusion matrix, we can see that the model has a strong accuracy score at .8472, indicating that the model actually predicted about 85% of the records in the training data. However, the model does have a low sensitivity score of .40150, indicating that the recall rate is fairly poor, and it is not able to accurately predict a true positive. The specificity score is high at .95622, indicating that the model is very good at accurately predicting true negatives.
+
+## Model 2: kNN Model, k = 5
+## Train Model
+```{r}
+AD_knn_model_k5 <- caret::knn3(TARGET ~ ., 
+                            data = AD_train_norm, k = 5)
+AD_knn_model_k5
+```
+
+## Predict Training Set
+```{r}
+AD_knn_pred_k5_train <- predict(AD_knn_model_k5, 
+                             newdata = AD_train_norm[, -c(1)], 
+                             type = "class")
+head(AD_knn_pred_k5_train)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k5_train, as.factor(AD_train_norm[, 1]),
+                positive = "Yes")
+```
+Looking at the confusion matrix, we can see that the model has a strong accuracy score at .824, indicating that the model actually predicted about 82% of the records in the training data. However, the model does have a low sensitivity score of .24939, indicating that the recall rate is poor, and it is not able to accurately predict a true positive. The specificity score is high at .96447, indicating that the model is very good at accurately predicting true negatives.
+
+## Model 2: kNN Model, k = 7
+## Train Model
+```{r}
+AD_knn_model_k7 <- caret::knn3(TARGET ~ ., 
+                            data = AD_train_norm, k = 7)
+AD_knn_model_k7
+```
+
+## Predict Training Set
+```{r}
+AD_knn_pred_k7_train <- predict(AD_knn_model_k7, 
+                             newdata = AD_train_norm[, -c(1)], 
+                             type = "class")
+head(AD_knn_pred_k7_train)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k7_train, as.factor(AD_train_norm[, 1]),
+                positive = "Yes")
+```
+Looking at the confusion matrix, we can see that the model has a strong accuracy score at .8147, indicating that the model actually predicted about 81% of the records in the training data. However, the model does have a low sensitivity score of .16400, indicating that the recall rate is poor, and it is not able to accurately predict a true positive. The specificity score is high at .97378, indicating that the model is very good at accurately predicting true negatives.
+
+## Model 2: Predict Validation Set, k = 3
+```{r}
+AD_knn_pred_k3_valid <- predict(AD_knn_model_k3, 
+                             newdata = AD_valid_norm, 
+                             type = "class")
+head(AD_knn_pred_k3_valid)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k3_valid, as.factor(AD_valid_norm[, 1]),
+                positive = "Yes")
+
+library(ROSE)
+
+ROSE::roc.curve(AD_valid_norm$TARGET, 
+                AD_knn_pred_k3_valid)
+```
+The AUC is fairly low at .524. The curve almost matches the diagonal line, indicating that the categorization of true positives may be due to random chance, and not the predicting power of the model. 
+
+One reason that the accuracy may be high but the sensitivity is low could be due to data imbalance. 
+
+## Model 2: Predict Validation Set, k = 5
+```{r}
+AD_knn_pred_k5_valid <- predict(AD_knn_model_k5, 
+                             newdata = AD_valid_norm[, -c(1)], 
+                             type = "class")
+head(AD_knn_pred_k5_valid)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k5_valid, as.factor(AD_valid_norm[, 1]),
+                positive = "Yes")
+
+
+ROSE::roc.curve(AD_valid_norm$TARGET, 
+                AD_knn_pred_k5_valid)
+```
+The AUC is fairly low at .523. The curve almost matches the diagonal line, indicating that the categorization of true positives may be due to random chance, and not the predicting power of the model. 
+
+One reason that the accuracy may be high but the sensitivity is low could be due to data imbalance.
+
+## Model 2: Predict Validation Set, k = 7
+```{r}
+AD_knn_pred_k7_valid <- predict(AD_knn_model_k7, 
+                             newdata = AD_valid_norm[, -c(1)], 
+                             type = "class")
+head(AD_knn_pred_k7_valid)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k5_valid, as.factor(AD_valid_norm[, 1]),
+                positive = "Yes")
+
+
+ROSE::roc.curve(AD_valid_norm$TARGET, 
+                AD_knn_pred_k5_valid)
+```
+The AUC is fairly low at .523. The curve almost matches the diagonal line, indicating that the categorization of true positives may be due to random chance, and not the predicting power of the model. 
+
+One reason that the accuracy may be high but the sensitivity is low could be due to data imbalance.
+
+## Model 3: Load Data
+```{r}
+
+ak_df <- read.csv("credit_fa2022_5.csv")
+ak_df <- ak_df [ , -c(1)]
+ak_df1 <- ak_df[ , c(2:3,5:11,29:31, 65:67)]
+ak_df1_clean <- drop_na(ak_df1)
+```
+After loading the data, I went through the variables and selected a few to predict "Target."  The variables I chose were Contract Type, Owns Car, Owns Realty, Number of Children, Total Income, Amount of Credit, Amount Annuity, Amount of Goods Price, Number of Family Members, region rating of where client lives, region rating of where client lives taking into account city, Amount of Inquires in the Month, Amount of Inquires in the Quarter, and Amount of Inquires in the Year.
+
+I also dropped all the missing values from the data set.
+
+
+## Model 3: Factorizing Data
+```{r}
+ak_df1_clean$TARGET <- factor(ak_df1_clean$TARGET, 
+                              levels = c("0", "1"),
+                              labels = c("No", "Yes"))
+ak_df1_clean$NAME_CONTRACT_TYPE <- as.factor(ak_df1_clean$NAME_CONTRACT_TYPE)
+ak_df1_clean$FLAG_OWN_CAR <- as.factor(ak_df1_clean$FLAG_OWN_CAR)
+ak_df1_clean$FLAG_OWN_REALTY <- as.factor(ak_df1_clean$FLAG_OWN_REALTY)
+
+str(ak_df1_clean)
+```
+I factorized the outcome variable and the categorical variables.
+
+## Model 3: Training-Validation Set
+```{r}
+set.seed(666)
+
+ak_train_index <- sample(1:nrow(ak_df1_clean), 0.7 * nrow(ak_df1_clean))
+ak_valid_index <- setdiff(1:nrow(ak_df1_clean), ak_train_index)
+
+ak_train <- ak_df1_clean[ak_train_index, ]
+ak_valid <- ak_df1_clean[ak_valid_index, ]
+
+nrow(ak_train)
+nrow(ak_valid)
+```
+I created sample and validation sets.  The training index spit was 70%, and the validation was 30%.
+
+## Model 3: Normalize Training and Validation Set
+```{r}
+ak_train_norm <- ak_train
+ak_valid_norm <- ak_valid
+
+ak_norm_values <- preProcess(ak_train[, c(5:15)],
+                          method = c("center",
+                                     "scale"))
+ak_train_norm[, c(5:15)] <- predict(ak_norm_values,
+                               ak_train[, c(5:15)])
+
+ak_valid_norm[, c(5:15)] <- predict(ak_norm_values,
+                                ak_valid[, c(5:15)])
+head(ak_valid_norm)
+```
+
+
+## Model 3: Load in New Customers and Normalize
+```{r}
+ak_new_cust <- read.csv("credit_test_fa2022_5.csv")
+ak_new_cust<- ak_new_cust [ , -c(1)]
+ak_new_cust1 <- ak_new_cust[ , c(2, 4:10, 28:30, 64:66)]
+ak_new_cust1 <- drop_na(ak_new_cust1)
+
+ak_new_cust1$NAME_CONTRACT_TYPE <- as.factor(ak_new_cust1$NAME_CONTRACT_TYPE)
+ak_new_cust1$FLAG_OWN_CAR <- as.factor(ak_new_cust1$FLAG_OWN_CAR)
+ak_new_cust1$FLAG_OWN_REALTY <- as.factor(ak_new_cust1$FLAG_OWN_REALTY)
+
+str(ak_new_cust1)
+
+ak_norm_values <- preProcess(ak_new_cust1[, c(4:14)],
+                          method = c("center",
+                                     "scale"))
+
+ak_new_cust_norm <- predict(ak_norm_values, ak_new_cust1)
+ak_new_cust_norm
+```
+
+## Model 3: kNN Model, k = 3
+## Train Model
+
+Creating multiple kNN models with different k values to see which one produces the best outcome.
+```{r}
+ak_knn_model_3 <- caret::knn3(TARGET ~ ., data = ak_train_norm, k = 3)
+ak_knn_model_3
+```
+
+## Predict Training Set
+```{r}
+ak_knn_pred_train_3 <- predict(ak_knn_model_3, newdata = ak_train_norm[, -c(1)], type = "class")
+
+confusionMatrix(ak_knn_pred_train_3, as.factor(ak_train_norm[, c(1)]), positive = "Yes")
+```
+The accuracy of this model was 85%, however, the sensitivity was only 38% showing that it is not effective at identifying "Yes."  The specificity was high at 96%.
+
+#Predict Validation Set
+```{r}
+ak_knn_pred_valid_3 <- predict(ak_knn_model_3, newdata = ak_valid_norm[, -c(1)], type = "class")
+
+confusionMatrix(ak_knn_pred_valid_3, as.factor(ak_valid_norm[, c(1)]), positive = "Yes")
+```
+The accuracy was 75.8%, but, once again, the sensitivity was low at 13%, while the specificity was high at 90%
+## Predict New Customers, k = 3
+```{r}
+ak_new_cust_predict_3 <- predict(ak_knn_model_3, newdata = ak_new_cust_norm,
+                            type = "class")
+ak_new_cust_predict_3
+```
+The model predicted "No" for all the new customers.
+
+## Model 3: kNN Model, k = 5
+## Train Model
+```{r}
+ak_knn_model_5 <- caret::knn3(TARGET ~ ., data = ak_train_norm, k = 5)
+ak_knn_model_5
+```
+
+## Predict Training Set and Validation Set
+```{r}
+ak_knn_pred_train_5 <- predict(ak_knn_model_5, newdata = ak_train_norm[, -c(1)], type = "class")
+
+confusionMatrix(ak_knn_pred_train_5, as.factor(ak_train_norm[, c(1)]))
+
+ak_knn_pred_valid_5 <- predict(ak_knn_model_5, newdata = ak_valid_norm[, -c(1)], type = "class")
+
+confusionMatrix(ak_knn_pred_valid_5, as.factor(ak_valid_norm[, c(1)]), positive = "Yes")
+```
+On the training set, the accuracy was 82%, and this time the sensitivity was higher at 97%, but the specificity was low at 20%.
+
+On the validation set, the accuracy was 77%, but the sensitivity was low at 7%.  The specificity was high at 94%.
+
+## Predict New Customers, k = 5
+```{r}
+ak_new_cust_predict_5 <- predict(ak_knn_model_5, newdata = ak_new_cust_norm,
+                            type = "class")
+ak_new_cust_predict_5
+```
+The model predicted "No" for all the new customers.
+
+## Model 3: kNN Model, k = 7
+## Train Model
+```{r}
+ak_knn_model_7 <- caret::knn3(TARGET ~ ., data = ak_train_norm, k = 7)
+ak_knn_model_7
+```
+
+## Predict Training Set
+```{r}
+ak_knn_pred_train_7 <- predict(ak_knn_model_7, newdata = ak_train_norm[, -c(1)], type = "class")
+
+confusionMatrix(ak_knn_pred_train_7, as.factor(ak_train_norm[, c(1)]))
+
+ak_knn_pred_valid_7 <- predict(ak_knn_model_7, newdata = ak_valid_norm[, -c(1)], type = "class")
+
+confusionMatrix(ak_knn_pred_valid_7, as.factor(ak_valid_norm[, c(1)]), positive = "Yes")
+```
+On the training set, the accuracy was 82%.  The sensitivity was 98%, while the specificity was 12%.
+
+On the validation set, the accuracy was 79%.  The sensitivity was 5%, while the specificity was 96%.
+
+## Predict New Customers, k = 7
+## Train Model
+```{r}
+ak_new_cust_predict_7 <- predict(ak_knn_model_7, newdata = ak_new_cust_norm,
+                            type = "class")
+ak_new_cust_predict_7
+```
+The model predicted "No" for all the new customers.
+
+## Evaluate
+```{r}
+ROSE::roc.curve(ak_valid_norm$TARGET,
+                ak_knn_pred_valid_7)
+```
+The ROC curve almost perfectly matches the straight line, and the area under the curve is .507 which is low.
+
+## Predict New Customer w/ Best Model
+
+We decided that Model 2, K = 3 was the best model since it had the highest sensitivity score of .14 while maintaining a high level of accuracy at .75 with a specificity score of .89. Although .14 is still low, this is the model that gives us the highest accuracy of capturing the true positive rate. Since it is preferable that we falsely calculate too many high-risk people rather than too little, we value the model with the highest sensitivity over the model with the highest specificity. 
+
+```{r}
+new_cust_predict <- predict(AD_knn_model_k3, newdata = AD_new_cust_norm,
+                            type = "class")
+new_cust_predict
+```
+
+Our model predicted that all the new customers would be categorized as not high risk. We are more confident about true negatives rather than true positives. Therefore, in future steps, we can utilize a decision tree with weighted sampling to help with the data imbalance problem. 
+
