@@ -1,0 +1,384 @@
+---
+title: "Project 2 Final"
+author: "Adam Kikuta"
+date: '2022-12-06'
+output:
+  pdf_document: default
+  html_document: default
+---
+# Problem
+For this project, we were tasked with helping Jacob Kawalski launch a real estate business and understand the market.
+
+# Objective
+We set out to predict the prices of new homes based on the selling prices of previous homes that were up for sale.  
+
+# Describing the Data
+The data set provides details about the year the house was built, amount of bedrooms/bathrooms, square feet, view, zip code, etc. The three of us all took out the ID, day, day of week, latitude, and longitude variables because we did not think they were relevant in predicting house prices.  Then, individually we selected variables from those that were left to make our predictions.  Lastly, we normalized and factorized the variables, so the code can run smoothly.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(forecast)
+library(caret)
+library(car)
+library(ROSE)
+library(ggplot2)
+```
+
+# KNN Model
+
+## Load Data
+```{r}
+df <- read.csv("house_5.csv", header = TRUE)
+df$new_price <- ifelse(df$price <= mean(df$price), "low", "high")
+AD_df <- df [ , -c(1:2)]
+AD_df2 <- AD_df[ , -c(3:4, 20:21)]
+AD_df2 <- drop_na(AD_df2)
+
+head(AD_df)
+str(AD_df2)
+```
+To begin, I loaded the data set. In order to run the kNN model, I needed to create an additional column for "new_price", which would ultimately take the "price" variable from the original data set then categorize it as either "low" or "high". From there, I dropped the unnecessary variables, which in this case were the first 4 columns and the last two before our newly created column. Because a kNN model cannot run with missing values, I added a code to drop any missing values.
+
+## Factorizing Data
+```{r}
+str(AD_df2)
+AD_df2$Month <- as.factor(AD_df2$Month)
+AD_df2$waterfront <- factor(AD_df2$waterfront,
+                            levels = c("0", "1"),
+                            labels = c("No", "Yes"))
+AD_df2$new_price <- factor(AD_df2$new_price,
+                            levels = c("low", "high"),
+                            labels = c("low", "high"))
+AD_df2$zipcode <- as.factor(AD_df2$zipcode)
+str(AD_df2)
+```
+Next, I went ahead and factorized the variables such as Month, waterfront, new_price, and zipcode. For our waterfront and new_price variable, I had to factorize those ones slightly differently in order for them to make sense. For waterfront, it was either "yes" or "no" because they either did or didn't have a waterfront view. In our original data set, new_price was a character. Through our different models, we wanted to see whether the price would be high or low, which is why we coded it that way. We wouldn't have been able to run the model if we kept it the way that it was because it could not categorize them.
+
+## Training-Validation Set
+```{r}
+set.seed(666)
+
+AD_train_index <- sample(1:nrow(AD_df2), 0.7 * nrow(AD_df2))
+AD_valid_index <- setdiff(1:nrow(AD_df2), AD_train_index)
+
+AD_train <- AD_df2[AD_train_index, ]
+AD_valid <- AD_df2[AD_valid_index, ]
+
+nrow(AD_train)
+nrow(AD_valid)
+```
+We set the seed so that we would get the same results each time we ran the code. We decided to do a 70-30 split for our training-validation set. 
+
+## Normalize Training and Validation Set
+```{r}
+AD_train_norm <- AD_train
+AD_valid_norm <- AD_valid
+
+AD_norm_values <- preProcess(AD_train[, c(3, 5, 8)],
+                          method = c("center",
+                                     "scale"))
+AD_train_norm[, c(3, 5, 8)] <- predict(AD_norm_values,
+                               AD_train[, c(3, 5, 8)])
+
+AD_valid_norm[, c(3, 5, 8)] <- predict(AD_norm_values,
+                                AD_valid[, c(3, 5, 8)])
+str(AD_valid_norm)
+head(AD_valid_norm)
+```
+In our data set, we had numerical variables, so we had to normalize them to put them on the same scale. These variables were price, bathrooms, and floors. 
+
+## Load in New Customers and Normalize
+```{r}
+new_cust <- read.csv("house_test_5.csv")
+new_cust_clean <- drop_na(new_cust)
+AD_new_cust <- new_cust_clean[ , -c(1:2, 5:6, 21:22)]
+head(AD_new_cust)
+
+str(AD_new_cust)
+
+AD_new_cust[, c(2,16)] <- lapply(AD_new_cust[, c(2,16)], as.factor)
+AD_new_cust$waterfront <- factor(AD_new_cust$waterfront,
+                            levels = c("0", "1"),
+                            labels = c("No", "Yes"))
+str(AD_new_cust)
+
+AD_norm_values <- preProcess(AD_new_cust[, c(4, 7)],
+                          method = c("center",
+                                     "scale"))
+AD_new_cust_norm <- predict(AD_norm_values, AD_new_cust)
+AD_new_cust_norm
+```
+We then loaded in the new data set and dropped any of the missing values. From there, we also removed the unnecessary variables that we did before so that both of our data sets matched in terms of containing the same variables. After that, we factorized the same variables that we did with our original data set and normalized the same variables as well.
+
+## kNN Model, k = 3
+## Train Model
+```{r}
+AD_knn_model_k3 <- caret::knn3(new_price ~ Year + Month + bedrooms + bathrooms + sqft_living + sqft_lot + floors + waterfront + view + condition + grade + sqft_above + sqft_basement + yr_built + yr_renovated + zipcode, 
+                            data = AD_train_norm, k = 3)
+AD_knn_model_k3
+```
+
+## Predict Training Set
+```{r}
+AD_knn_pred_k3_train <- predict(AD_knn_model_k3, 
+                             newdata = AD_train_norm, 
+                             type = "class")
+head(AD_knn_pred_k3_train)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k3_train, as.factor(AD_train_norm[, 18]), positive = "high")
+```
+Looking at the confusion matrix, we can see that the model has a strong accuracy score at .8636, indicating that the model actually predicted about 86% of the records in the training data. Both the sensitivity (.7708) and specificity (.9165) are relatively high, indicating that the recall rate is very good, and it is able to accurately predict a true positive, as well as accurately predict true negatives. 
+
+## kNN Model, k = 5
+## Train Model
+```{r}
+AD_knn_model_k5 <- caret::knn3(new_price ~ Year + Month + bedrooms + bathrooms + sqft_living + sqft_lot + floors + waterfront + view + condition + grade + sqft_above + sqft_basement + yr_built + yr_renovated + zipcode, 
+                            data = AD_train_norm, k = 5)
+AD_knn_model_k5
+```
+
+## Predict Training Set
+```{r}
+AD_knn_pred_k5_train <- predict(AD_knn_model_k5, 
+                             newdata = AD_train_norm, 
+                             type = "class")
+head(AD_knn_pred_k5_train)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k5_train, as.factor(AD_train_norm[, 18]), positive = "high")
+```
+Looking at the confusion matrix, we can see that the model has a strong accuracy score at .8342, indicating that the model actually predicted about 83% of the records in the training data. Both the sensitivity (.7191) and specificity (.8999) are relatively high, indicating that the recall rate is very good, and it is able to accurately predict a true positive, as well as accurately predict true negatives. 
+
+## kNN Model, k = 7
+## Train Model
+```{r}
+AD_knn_model_k7 <- caret::knn3(new_price ~ Year + Month + bedrooms + bathrooms + sqft_living + sqft_lot + floors + waterfront + view + condition + grade + sqft_above + sqft_basement + yr_built + yr_renovated + zipcode, 
+                            data = AD_train_norm, k = 7)
+AD_knn_model_k7
+```
+
+## Predict Training Set
+```{r}
+AD_knn_pred_k7_train <- predict(AD_knn_model_k7, 
+                             newdata = AD_train_norm, 
+                             type = "class")
+head(AD_knn_pred_k7_train)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k7_train, as.factor(AD_train_norm[, 18]), positive = "high")
+```
+Looking at the confusion matrix, we can see that the model has a strong accuracy score at .821, indicating that the model actually predicted about 82% of the records in the training data. Both the sensitivity (.6922) and specificity (.8945) are relatively high, indicating that the recall rate is very good, and it is able to accurately predict a true positive, as well as accurately predict true negatives. 
+
+## Predict Validation Set, k = 3
+```{r}
+AD_knn_pred_k3_valid <- predict(AD_knn_model_k3, 
+                             newdata = AD_valid_norm, 
+                             type = "class")
+head(AD_knn_pred_k3_valid)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k3_valid, as.factor(AD_valid_norm[, 18]),
+                positive = "high")
+
+library(ROSE)
+
+ROSE::roc.curve(AD_valid_norm$new_price, 
+                AD_knn_pred_k3_valid)
+```
+The AUC is fairly high at .722, which means that the model is good at distinguishing between the positive and negative classes. 
+
+## Predict Validation Set, k = 5
+```{r}
+AD_knn_pred_k5_valid <- predict(AD_knn_model_k5, 
+                             newdata = AD_valid_norm, 
+                             type = "class")
+head(AD_knn_pred_k5_valid)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k5_valid, as.factor(AD_valid_norm[, 18]),
+                positive = "high")
+
+library(ROSE)
+
+ROSE::roc.curve(AD_valid_norm$new_price, 
+                AD_knn_pred_k5_valid)
+```
+The AUC is fairly high at .730, which means that the model is good at distinguishing between the positive and negative classes. 
+
+## Predict Validation Set, k = 7
+```{r}
+AD_knn_pred_k7_valid <- predict(AD_knn_model_k7, 
+                             newdata = AD_valid_norm, 
+                             type = "class")
+head(AD_knn_pred_k7_valid)
+```
+
+## Evaluate
+```{r}
+confusionMatrix(AD_knn_pred_k7_valid, as.factor(AD_valid_norm[, 18]),
+                positive = "high")
+
+library(ROSE)
+
+ROSE::roc.curve(AD_valid_norm$new_price, 
+                AD_knn_pred_k7_valid)
+```
+The AUC is fairly high at .735, which means that the model is good at distinguishing between the positive and negative classes. 
+
+```{r}
+new_cust_predict <- predict(AD_knn_model_k5, newdata = AD_new_cust_norm,
+                            type = "class")
+new_cust_predict
+```
+
+
+
+# Regression Model
+
+## Load in Data
+```{r}
+NUhousing_df <- read.csv("house_5.csv", header = TRUE)
+head(NUhousing_df)
+```
+## Drop Unneccessary Variables and Missing Values
+```{r}
+NUhousing_df_1 <- NUhousing_df[, -c(1:2, 5:6, 22:23)]
+NUhousing_df_1 <- drop_na(NUhousing_df_1)
+```
+Dropping unnecessary variables such as ID, Day of Month, and Day of Week since domain knowledge tells us that these variables are not very useful. Additionally, dropping lattitute and longitude since zipcode is a better predicter of location than these variables. 
+
+## Change Variable Types
+```{r}
+str(NUhousing_df_1)
+NUhousing_df_1[, c(2,9,17)] <- lapply(NUhousing_df_1[, c(2,9,17)], as.factor)
+str(NUhousing_df_1)
+```
+Factorizing month, waterfront, and zipcode since these integers represent a certain value. 
+
+## Training Validation Split
+```{r}
+set.seed(666)
+
+NUtrain_index <- sample(1:nrow(NUhousing_df_1), 0.6 * nrow(NUhousing_df_1))
+NUvalid_index <- setdiff(1:nrow(NUhousing_df_1), NUtrain_index)
+
+NUtrain_df <- NUhousing_df_1[NUtrain_index, ]
+NUvalid_df <- NUhousing_df_1[NUvalid_index, ]
+
+nrow(NUtrain_df)
+nrow(NUvalid_df)
+```
+
+##Correlation Matrix
+```{r}
+library(corrgram)
+corrgram(NUtrain_df)
+```
+The variables most strongly correlated with price are bedrooms, bathrooms, sqft living, grade, sqft above, sqft basement. 
+Square foot living is strongly correlated to square foot above, so I will drop sqft above since it is encompassed by square foot living, which is the square footage of the whole home. Since bathrooms and sqft living are correlated, and living seems more important, I will drop bathrooms. 
+
+## Variable Set 1 
+I will first run a regression with all the variables of interest, including the categorical variables not present in the correlation matrix. 
+```{r}
+names(NUhousing_df_1)
+NUreg_model1 <- lm(price ~ Year + bedrooms + sqft_living + grade + sqft_basement + waterfront  + zipcode, 
+                      data = NUtrain_df)
+summary(NUreg_model1)
+```
+
+## Predicting Training Set 1 
+```{r}
+library(forecast)
+NUreg_model_pred_train <- predict(NUreg_model1,
+                                NUtrain_df)
+accuracy(NUreg_model_pred_train, NUtrain_df$price)
+
+```
+
+```{r}
+sd(NUtrain_df$price)
+```
+
+Since the standard deviation of price is $368,977 and the RMSE is only 168,407 which is about half of one standard deviation of price, this indicates this model may not have much error and will be good at predictions. 
+
+## Predicting Validation Set 1 
+```{r}
+NUreg_model_pred_valid1 <- predict(NUreg_model1,
+                                NUvalid_df)
+accuracy(NUreg_model_pred_valid1, NUvalid_df$price)
+
+```
+The validation set RMSE is slightly lower that the training set, which is unlikely but could be due to random chance. The validation set's RMSE being low is a good sign that the model is good at predicting other data sets. 
+
+## Regression Model 2 
+For this regression model, I only included the numerical variables of interest and excluded the categorical variables to see if fewer variables would improve our error rate. 
+```{r}
+NUreg_model2 <- lm(price ~ bedrooms + sqft_living + grade + sqft_basement, 
+                      data = NUtrain_df)
+summary(NUreg_model2)
+```
+
+## Predict Training Set 2
+
+```{r}
+NUreg_model_pred_train2 <- predict(NUreg_model2,
+                                NUtrain_df)
+accuracy(NUreg_model_pred_train2, NUtrain_df$price)
+```
+
+
+
+## Predicting Validation Set
+```{r}
+NUreg_model_pred_valid2 <- predict(NUreg_model2,
+                                NUvalid_df)
+accuracy(NUreg_model_pred_valid2, NUvalid_df$price)
+```
+Since the RMSE for the training and validation set of regression 2 is higher than regression 1, this shows that regression 1 may be the more accurate model. 
+
+## Evaluating Model - Regression 1
+```{r}
+library(car)
+vif(NUreg_model1)
+```
+Square foot of living and grade seem to have some multicollinearity, but the other variables have low VIF values which is good. This makes sense because houses with higher square foot would have a higher grade since this is a desirable trait. 
+
+## Homoskedasticity
+```{r}
+library(lmtest)
+bptest(NUreg_model1)
+```
+Since the p-value is less than .05, we have sufficient evidence that there is not heteroskedasticity in the model.
+
+## Predicting Prices of New Houses
+```{r}
+NUnew_record <- read.csv("house_test_5.csv", header = TRUE)
+NUnew_record<- NUnew_record[, -c(1:2, 5:6, 21:22)]
+NUnew_record[, c(2,8,16)] <- lapply(NUnew_record[, c(2,8,16)], as.factor)
+
+NUreg_model_pred_new <- predict(NUreg_model1,
+                                newdata = NUnew_record, interval = "confidence")
+NUreg_model_pred_new
+```
+
+The confidence interval indicates that there is a 95% chance of the true price being between the lower and upper bound for each of the houses. Since our model had a pretty small error rate compared to the standard deviation, we can rely on these predictions to a certain extent.  
+
+
+# Predict new house prices with best model
+
+We decided that the regression model was the best model because it provides us with a range of prices for the homes, instead of simply "high" or "low."  We chose regression model 1 because it has a lower RMSE for both the training and validation sets, showing that it should predict other data sets more accurately.  Our model predicted that we can be 95% confident that the true price of the houses will be between the lower and upper bounds.
